@@ -1,15 +1,13 @@
 services:
   - type: web
-    name: email-middleware
+    name: email-middleware-resend
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
     envVars:
+      - key: RESEND_API_KEY
+        sync: false
       - key: SENDER_EMAIL
         sync: false
-      - key: SENDER_PASSWORD
-        sync: false
-      - key: SMTP_SERVER
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: 587
+      - key: SENDER_NAME
+        value: Contact Form
