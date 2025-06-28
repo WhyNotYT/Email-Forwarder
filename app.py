@@ -1,11 +1,9 @@
 from flask import Flask, request, jsonify
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import os
 from datetime import datetime
 import logging
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -16,25 +14,28 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Email configuration - set these as environment variables
-SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
+# Resend configuration
+RESEND_API_KEY = os.getenv('RESEND_API_KEY')
 SENDER_EMAIL = os.getenv('SENDER_EMAIL')
-SENDER_PASSWORD = os.getenv('SENDER_PASSWORD')
+SENDER_NAME = os.getenv('SENDER_NAME', 'Contact Form')
 
-def send_email(name, sender_email, message, target_email):
+def send_email_resend(name, sender_email, message, target_email):
     """
-    Send email using the provided credentials
+    Send email using Resend API
     """
     try:
-        # Create message
-        msg = MIMEMultipart()
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = target_email
-        msg['Subject'] = name  # Subject is the sender's name
+        url = "https://api.resend.com/emails"
         
-        # Email body content
-        body = f"""
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "from": f"{SENDER_NAME} <{SENDER_EMAIL}>",
+            "to": [target_email],
+            "subject": name,  # Subject is the sender's name
+            "text": f"""
 Contact Form Submission
 
 From: {name}
@@ -44,23 +45,20 @@ Message:
 
 ---
 Sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """.strip()
+            """.strip()
+        }
         
-        msg.attach(MIMEText(body, 'plain'))
+        response = requests.post(url, json=data, headers=headers)
         
-        # Connect to server and send email
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()  # Enable encryption
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(SENDER_EMAIL, target_email, text)
-        server.quit()
-        
-        logger.info(f"Email sent successfully from {name} ({sender_email}) to {target_email}")
-        return True
+        if response.status_code == 200:
+            logger.info(f"Email sent successfully from {name} ({sender_email}) to {target_email}")
+            return True
+        else:
+            logger.error(f"Resend error: {response.status_code} - {response.text}")
+            return False
         
     except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
+        logger.error(f"Failed to send email via Resend: {str(e)}")
         return False
 
 @app.route('/send-email', methods=['POST'])
@@ -89,8 +87,8 @@ def handle_email():
             }), 400
         
         # Check if email configuration is set
-        if not all([SENDER_EMAIL, SENDER_PASSWORD]):
-            logger.error("Email configuration not properly set")
+        if not all([RESEND_API_KEY, SENDER_EMAIL]):
+            logger.error("Resend configuration not properly set")
             return jsonify({
                 'success': False,
                 'error': 'Server email configuration error'
@@ -123,7 +121,7 @@ def handle_email():
             }), 400
         
         # Send email
-        if send_email(name, email, message, target_email):
+        if send_email_resend(name, email, message, target_email):
             return jsonify({
                 'success': True,
                 'message': 'Email sent successfully'
@@ -148,7 +146,8 @@ def health_check():
     """
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'email_service': 'Resend'
     }), 200
 
 @app.route('/', methods=['GET'])
@@ -157,7 +156,7 @@ def index():
     Basic info endpoint
     """
     return jsonify({
-        'service': 'Email Middleware',
+        'service': 'Email Middleware (Resend)',
         'version': '1.0',
         'endpoints': {
             'POST /send-email': 'Send email from contact form',
@@ -167,18 +166,16 @@ def index():
 
 if __name__ == '__main__':
     # Check if required environment variables are set
-    if not SENDER_EMAIL or not SENDER_PASSWORD:
+    if not RESEND_API_KEY or not SENDER_EMAIL:
         print("ERROR: Please set the following environment variables:")
-        print("- SENDER_EMAIL: The email address to send from")
-        print("- SENDER_PASSWORD: The password for the sender email")
+        print("- RESEND_API_KEY: Your Resend API key")
+        print("- SENDER_EMAIL: The verified sender email address")
         print("\nOptional environment variables:")
-        print("- SMTP_SERVER: SMTP server (default: smtp.gmail.com)")
-        print("- SMTP_PORT: SMTP port (default: 587)")
+        print("- SENDER_NAME: The sender name (default: Contact Form)")
         exit(1)
     
-    print(f"Starting email middleware...")
+    print(f"Starting email middleware with Resend...")
     print(f"Sender: {SENDER_EMAIL}")
-    print(f"SMTP: {SMTP_SERVER}:{SMTP_PORT}")
     
     # Get port from environment variable (Render provides this)
     port = int(os.getenv('PORT', 5000))
